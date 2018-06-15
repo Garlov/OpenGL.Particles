@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
+#include <algorithm>
+#include <vector>
 
 // Include GLEW
 #include <GL/glew.h>
@@ -16,6 +18,46 @@ GLFWwindow* window;
 using namespace glm;
 
 #include "shader.hpp"
+
+struct Particle {
+	glm::vec3 pos, speed;
+	unsigned char r, g, b, a; // Color
+	float size, angle, weight;
+	float life; // Remaining life of the particle. if <0 : dead and unused.
+	float cameradistance; // *Squared* distance to the camera. if dead : -1.0f
+
+	bool operator<(const Particle& that) const {
+		// Sort in reverse order : far particles drawn first.
+		return this->cameradistance > that.cameradistance;
+	}
+};
+
+const int MaxParticles = 100000;
+Particle ParticlesContainer[MaxParticles];
+int LastUsedParticle = 0;
+
+int FindUnusedParticle() {
+
+	for (int i = LastUsedParticle; i < MaxParticles; i++) {
+		if (ParticlesContainer[i].life < 0) {
+			LastUsedParticle = i;
+			return i;
+		}
+	}
+
+	for (int i = 0; i < LastUsedParticle; i++) {
+		if (ParticlesContainer[i].life < 0) {
+			LastUsedParticle = i;
+			return i;
+		}
+	}
+
+	return 0; // All particles are taken, override the first one
+}
+
+void SortParticles() {
+	std::sort(&ParticlesContainer[0], &ParticlesContainer[MaxParticles]);
+}
 
 int main(void)
 {
@@ -81,24 +123,31 @@ int main(void)
 	glm::mat4 Model = glm::mat4(1.0f);
 	glm::mat4 MVP = Projection * View * Model;
 
-	GLfloat* g_vertex_buffer_data = new GLfloat[12 * 3 * 3];
-	GLfloat* g_color_buffer_data = new GLfloat[3];
-	GLfloat* g_position_buffer_data = new GLfloat[3];
+	static const GLfloat g_vertex_buffer_data[] = {
+		-0.5f, -0.5f, 0.0f,
+		0.5f, -0.5f, 0.0f,
+		-0.5f,  0.5f, 0.0f,
+		0.5f,  0.5f, 0.0f,
+	};
+	GLfloat* g_color_buffer_data = new GLfloat[MaxParticles * 3];
+	GLfloat* g_position_buffer_data = new GLfloat[MaxParticles * 3];
 
 	GLuint vertexBuffer;
 	glGenBuffers(1, &vertexBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-	glBufferData(GL_ARRAY_BUFFER, 12 * 3 * 3 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), NULL, GL_STREAM_DRAW);
 
 	GLuint colorBuffer;
 	glGenBuffers(1, &colorBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, colorBuffer);
-	glBufferData(GL_ARRAY_BUFFER, 3 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, MaxParticles * 4 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
 
 	GLuint positionBuffer;
 	glGenBuffers(1, &positionBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
-	glBufferData(GL_ARRAY_BUFFER, 3 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, MaxParticles * 4 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
+
+	int ParticlesCount = 0;
 
 	const double FRAMES_PER_SECOND = 60; // this should be able to run the update loop at 60 fps easily
 	const double MS_PER_FRAME = 1000 / FRAMES_PER_SECOND;
@@ -167,7 +216,7 @@ int main(void)
 		glBindBuffer(GL_ARRAY_BUFFER, colorBuffer);
 		glVertexAttribPointer(
 			1,                              // attribute. No particular reason for 1, but must match the layout in the shader.
-			3,                              // size
+			4,                              // size
 			GL_FLOAT,						// type
 			GL_FALSE,                       // normalized?
 			0,                              // stride
@@ -178,18 +227,19 @@ int main(void)
 		glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
 		glVertexAttribPointer(
 			2,                                // attribute. No particular reason for 1, but must match the layout in the shader.
-			3,                                // size
+			4,                                // size
 			GL_FLOAT,                         // type
 			GL_FALSE,                         // normalized?
 			0,                                // stride
 			(void*)0                          // array buffer offset
 		);
 
+		glVertexAttribDivisor(0, 0); // reuse same vertice on all particles
 		glVertexAttribDivisor(1, 1); // colors : one per instance
 		glVertexAttribDivisor(2, 1); // positions : one per instance
 
 									 // draw
-		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 12 * 3, 1);
+		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, ParticlesCount);
 
 		glDisableVertexAttribArray(0);
 		glDisableVertexAttribArray(1);
