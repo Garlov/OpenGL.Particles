@@ -13,15 +13,18 @@
 GLFWwindow* window;
 
 // Include GLM
+#define GLM_ENABLE_EXPERIMENTAL
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/norm.hpp>
 using namespace glm;
 
 #include "shader.hpp"
 
 struct Particle {
 	glm::vec3 pos, speed;
-	unsigned char r, g, b, a; // Color
+	GLfloat r, g, b, a; // Color
 	float size, angle, weight;
 	float life; // Remaining life of the particle. if <0 : dead and unused.
 	float cameradistance; // *Squared* distance to the camera. if dead : -1.0f
@@ -32,13 +35,13 @@ struct Particle {
 	}
 };
 
-const int MaxParticles = 100000;
-Particle ParticlesContainer[MaxParticles];
+const int MAX_PARTICLES = 100000;
+Particle ParticlesContainer[MAX_PARTICLES];
 int LastUsedParticle = 0;
 
-int FindUnusedParticle() {
+int findUnusedParticle() {
 
-	for (int i = LastUsedParticle; i < MaxParticles; i++) {
+	for (int i = LastUsedParticle; i < MAX_PARTICLES; i++) {
 		if (ParticlesContainer[i].life < 0) {
 			LastUsedParticle = i;
 			return i;
@@ -56,7 +59,7 @@ int FindUnusedParticle() {
 }
 
 void SortParticles() {
-	std::sort(&ParticlesContainer[0], &ParticlesContainer[MaxParticles]);
+	std::sort(&ParticlesContainer[0], &ParticlesContainer[MAX_PARTICLES]);
 }
 
 int main(void)
@@ -115,7 +118,7 @@ int main(void)
 
 	// Camera matrix
 	glm::mat4 View = glm::lookAt(
-		glm::vec3(100, 100, -100), // Camera pos
+		glm::vec3(10, 10, -10), // Camera pos
 		glm::vec3(0, 0, 0), // Camera lookat
 		glm::vec3(0, 1, 0)  // Camera up dir
 	);
@@ -123,29 +126,31 @@ int main(void)
 	glm::mat4 Model = glm::mat4(1.0f);
 	glm::mat4 MVP = Projection * View * Model;
 
+	glm::vec3 CameraPosition(glm::inverse(View)[3]);
+
 	static const GLfloat g_vertex_buffer_data[] = {
 		-0.5f, -0.5f, 0.0f,
 		0.5f, -0.5f, 0.0f,
 		-0.5f,  0.5f, 0.0f,
 		0.5f,  0.5f, 0.0f,
 	};
-	GLfloat* g_color_buffer_data = new GLfloat[MaxParticles * 3];
-	GLfloat* g_position_buffer_data = new GLfloat[MaxParticles * 3];
+	GLfloat* g_color_buffer_data = new GLfloat[MAX_PARTICLES * 3];
+	GLfloat* g_position_buffer_data = new GLfloat[MAX_PARTICLES * 3];
 
 	GLuint vertexBuffer;
 	glGenBuffers(1, &vertexBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), NULL, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), g_vertex_buffer_data, GL_STATIC_DRAW);
 
 	GLuint colorBuffer;
 	glGenBuffers(1, &colorBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, colorBuffer);
-	glBufferData(GL_ARRAY_BUFFER, MaxParticles * 4 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES * 4 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
 
 	GLuint positionBuffer;
 	glGenBuffers(1, &positionBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
-	glBufferData(GL_ARRAY_BUFFER, MaxParticles * 4 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES * 4 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
 
 	int ParticlesCount = 0;
 
@@ -153,7 +158,7 @@ int main(void)
 	const double MS_PER_FRAME = 1000 / FRAMES_PER_SECOND;
 	const double MAX_FRAMESKIP = 5;
 
-	double next_game_tick = glfwGetTime() * 1000;
+	double nextGameTick = glfwGetTime() * 1000;
 	int loops;
 
 	int currentDrawsPerSecond = 0;
@@ -164,34 +169,103 @@ int main(void)
 	while (glfwGetKey(window, GLFW_KEY_ESCAPE) != GLFW_PRESS && glfwWindowShouldClose(window) == 0) {
 		double newTime = glfwGetTime() * 1000;
 		loops = 0;
-		while (newTime > next_game_tick && loops < MAX_FRAMESKIP) {
+		while (newTime > nextGameTick && loops < MAX_FRAMESKIP) {
 
 			// update stuff
+			int newParticles = 1;
+
+			for (int i = 0; i < newParticles; i++) {
+				int particleIndex = findUnusedParticle();
+				ParticlesContainer[particleIndex].life = 10000.0f; // in seconds
+				ParticlesContainer[particleIndex].pos = glm::vec3(0, 0, -20.0f);
+
+				float spread = 1.5f;
+				glm::vec3 maindir = glm::vec3(0.0f, 10.0f, 0.0f);
+				// Very bad way to generate a random direction; 
+				// See for instance http://stackoverflow.com/questions/5408276/python-uniform-spherical-distribution instead,
+				// combined with some user-controlled parameters (main direction, spread, etc)
+				glm::vec3 randomdir = glm::vec3(
+					(rand() % 2000 - 1000.0f) / 1000.0f,
+					(rand() % 2000 - 1000.0f) / 1000.0f,
+					(rand() % 2000 - 1000.0f) / 1000.0f
+				);
+
+				ParticlesContainer[particleIndex].speed = maindir + randomdir * spread;
+
+				// Very bad way to generate a random color
+				ParticlesContainer[particleIndex].r = (GLfloat)rand() / RAND_MAX;
+				ParticlesContainer[particleIndex].g = (GLfloat)rand() / RAND_MAX;
+				ParticlesContainer[particleIndex].b = (GLfloat)rand() / RAND_MAX;
+				ParticlesContainer[particleIndex].a = ((GLfloat)rand() / RAND_MAX) / 3;
+
+				ParticlesContainer[particleIndex].size = (rand() % 1000) / 2000.0f + 0.1f;
+			}
+
+			// Simulate all particles
+			int ParticlesCount = 0;
+			for (int i = 0; i < MAX_PARTICLES; i++) {
+
+				Particle& p = ParticlesContainer[i]; // shortcut
+
+				if (p.life > 0.0f) {
+
+					// Decrease life
+					p.life -= MS_PER_FRAME;
+					if (p.life > 0.0f) {
+
+						// Simulate simple physics : gravity only, no collisions
+						p.speed += glm::vec3(0.0f, -9.81f, 0.0f) * (float)MS_PER_FRAME * 0.5f;
+						p.pos += p.speed * (float)MS_PER_FRAME;
+						p.cameradistance = glm::length2(p.pos - CameraPosition);
+						//ParticlesContainer[i].pos += glm::vec3(0.0f,10.0f, 0.0f) * (float)delta;
+
+						// Fill the GPU buffer
+						g_position_buffer_data[4 * ParticlesCount + 0] = p.pos.x;
+						g_position_buffer_data[4 * ParticlesCount + 1] = p.pos.y;
+						g_position_buffer_data[4 * ParticlesCount + 2] = p.pos.z;
+
+						g_position_buffer_data[4 * ParticlesCount + 3] = p.size;
+
+						g_color_buffer_data[4 * ParticlesCount + 0] = p.r;
+						g_color_buffer_data[4 * ParticlesCount + 1] = p.g;
+						g_color_buffer_data[4 * ParticlesCount + 2] = p.b;
+						g_color_buffer_data[4 * ParticlesCount + 3] = p.a;
+
+					}
+					else {
+						// Particles that just died will be put at the end of the buffer in SortParticles();
+						p.cameradistance = -1.0f;
+					}
+
+					ParticlesCount++;
+
+				}
+			}
+
+			SortParticles();
+
 			currentUpdatesPerSecond += 1;
 
-			next_game_tick += MS_PER_FRAME;
+			nextGameTick += MS_PER_FRAME;
 			loops++;
 		}
 		// No moving objects in this, so no need to use the interpolation
 		//interpolation = float(newTime + SKIP_TICKS - next_game_tick) / float(SKIP_TICKS);
 
 		// draw stuff
+
 		currentDrawsPerSecond += 1;
 
 		// Clear the screen
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-		glBufferData(GL_ARRAY_BUFFER, 12 * 3 * 3 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * 12 * 3 * 3, g_vertex_buffer_data);
+		glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
+		glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES * 4 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, ParticlesCount * sizeof(GLfloat) * 4, g_position_buffer_data);
 
 		glBindBuffer(GL_ARRAY_BUFFER, colorBuffer);
-		glBufferData(GL_ARRAY_BUFFER, 3 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * 3, g_color_buffer_data);
-
-		glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
-		glBufferData(GL_ARRAY_BUFFER, 3 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * 3, g_position_buffer_data);
+		glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES * 4 * sizeof(GLubyte), NULL, GL_STREAM_DRAW); // Buffer orphaning, a common way to improve streaming perf. See above link for details.
+		glBufferSubData(GL_ARRAY_BUFFER, 0, ParticlesCount * sizeof(GLubyte) * 4, g_color_buffer_data);
 
 		glUseProgram(programID);
 
